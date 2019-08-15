@@ -3,10 +3,8 @@ package main
 import (
 	"bytes"
 	"encoding/csv"
-	"encoding/json"
 	"flag"
-	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -15,77 +13,73 @@ import (
 )
 
 func main() {
+	log.Println(strings.Repeat("=", 10), "Starting", strings.Repeat("=", 10))
 	path := flag.String("path", "./data.csv", "Path of the file")
 	flag.Parse()
-	fileBytes, fileNPath := ReadCSV(path)
-	SaveFile(fileBytes, fileNPath)
-	fmt.Println(strings.Repeat("=", 10), "Done", strings.Repeat("=", 10))
-}
-
-// ReadCSV to read the content of CSV File
-func ReadCSV(path *string) ([]byte, string) {
+	log.Printf("Opening %s\n", *path)
 	csvFile, err := os.Open(*path)
-
 	if err != nil {
 		log.Fatal("The file is not found || wrong root")
 	}
 	defer csvFile.Close()
 
-	reader := csv.NewReader(csvFile)
-	content, _ := reader.ReadAll()
-
-	if len(content) < 1 {
-		log.Fatal("Something wrong, the file maybe empty or length of the lines are not the same")
-	}
-
-	headersArr := make([]string, 0)
-	for _, headE := range content[0] {
-		headersArr = append(headersArr, headE)
-	}
-
-	//Remove the header row
-	content = content[1:]
-
-	var buffer bytes.Buffer
-	buffer.WriteString("[")
-	for i, d := range content {
-		buffer.WriteString("{")
-		for j, y := range d {
-			buffer.WriteString(`"` + headersArr[j] + `":`)
-			_, fErr := strconv.ParseFloat(y, 32)
-			_, bErr := strconv.ParseBool(y)
-			if fErr == nil {
-				buffer.WriteString(y)
-			} else if bErr == nil {
-				buffer.WriteString(strings.ToLower(y))
-			} else {
-				buffer.WriteString((`"` + y + `"`))
-			}
-			//end of property
-			if j < len(d)-1 {
-				buffer.WriteString(",")
-			}
-
-		}
-		//end of object of the array
-		buffer.WriteString("}")
-		if i < len(content)-1 {
-			buffer.WriteString(",")
-		}
-	}
-
-	buffer.WriteString(`]`)
-	rawMessage := json.RawMessage(buffer.String())
-	x, _ := json.MarshalIndent(rawMessage, "", "  ")
 	newFileName := filepath.Base(*path)
 	newFileName = newFileName[0:len(newFileName)-len(filepath.Ext(newFileName))] + ".json"
-	r := filepath.Dir(*path)
-	return x, filepath.Join(r, newFileName)
+	log.Printf("Writing to %s\n", newFileName)
+	jsonFile, err := os.Create(newFileName)
+	if err != nil {
+		log.Fatal("Unable to create json file")
+	}
+	defer jsonFile.Close()
+	lineCount := ConvertCSVToJson(csvFile, jsonFile)
+	log.Printf("Processed %d rows\n", lineCount)
+	log.Println(strings.Repeat("=", 12), "Done", strings.Repeat("=", 12))
 }
 
-// SaveFile Will Save the file, magic right?
-func SaveFile(myFile []byte, path string) {
-	if err := ioutil.WriteFile(path, myFile, os.FileMode(0644)); err != nil {
-		panic(err)
+// ConvertCSVToJson to convert the content of CSV File to a JSON File
+func ConvertCSVToJson(csvFile *os.File, jsonFile *os.File) int64 {
+
+	reader := csv.NewReader(csvFile)
+	var lineNumber int64
+	headersArr := make([]string, 0)
+	var buffer bytes.Buffer
+	for {
+		line, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if lineNumber == 0 {
+			for _, headE := range line {
+				headersArr = append(headersArr, headE)
+			}
+		} else {
+			buffer.WriteString("{")
+			for j, y := range line {
+				buffer.WriteString(`"` + headersArr[j] + `":`)
+				_, fErr := strconv.ParseFloat(y, 32)
+				_, bErr := strconv.ParseBool(y)
+				if fErr == nil {
+					buffer.WriteString(y)
+				} else if bErr == nil {
+					buffer.WriteString(strings.ToLower(y))
+				} else {
+					buffer.WriteString((`"` + y + `"`))
+				}
+				//end of property
+				if j < len(line)-1 {
+					buffer.WriteString(",")
+				}
+
+			}
+			//end of object of the array
+			buffer.WriteString("}")
+			buffer.WriteString("\n")
+			jsonFile.WriteString(buffer.String())
+			buffer.Reset()
+		}
+		lineNumber++
+
 	}
+	return lineNumber
+
 }
